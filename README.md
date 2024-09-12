@@ -1,6 +1,8 @@
 # controlled-sde-learn
+
 ![License](https://img.shields.io/badge/License-MIT-black.svg)
 [![codecov](https://codecov.io/gh/lmotte/controlled-sde-learn/graph/badge.svg?token=V4O1J7FGOM)](https://codecov.io/gh/lmotte/controlled-sde-learn)
+
 ## Overview
 
 This repository provides a Python implementation for estimating the coefficients of controlled stochastic differential
