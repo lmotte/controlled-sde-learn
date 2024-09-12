@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from methods.fp_estimator import FPEstimator
+from methods.fp_estimator_controlled import FPEstimator
 
 
 def test_fpestimator_initialization():
@@ -20,11 +20,9 @@ def test_fpestimator_initialization():
 
     # Check that all parameters are initialized to None
     assert estimator.la is None, "Expected la to be initialized to None"
-    assert estimator.be is None, "Expected be to be initialized to None"
     assert estimator.gamma_z is None, "Expected gamma_z to be initialized to None"
-    assert estimator.kde is None, "Expected kde to be initialized to None"
+    assert estimator.kde_list is None, "Expected kde to be initialized to None"
     assert estimator.c_kernel is None, "Expected c_kernel to be initialized to None"
-    assert estimator.mu is None, "Expected mu to be initialized to None"
 
     # Check that all attributes set during training are None
     assert estimator.T is None, "Expected T to be None"
@@ -61,27 +59,27 @@ def test_fit():
     estimator = FPEstimator()
     estimator.la = 100  # Regularization parameter
     estimator.gamma_z = 1  # Kernel parameter
-    estimator.be = 1  # Scaling/bandwidth parameter
     estimator.T = 1  # Scaling/bandwidth parameter
     estimator.c_kernel = 1
 
     # Mock data
     T_tr = np.random.uniform(0, 10, size=(50, 1))
     X_tr = np.random.uniform(-1, 1, size=(50, 1))
+    U_tr = [lambda t: t]
 
     # Mock probability density function
     def mock_pdf(Ts, X, partial):
         Ts_grid, X_grid = np.meshgrid(Ts, X, indexing="ij")
-        P = np.exp(-(X_grid**2) / (1 + Ts_grid))
+        P = np.exp(-(X_grid ** 2) / (1 + Ts_grid))
         P = P.reshape((-1, 1))
         if partial:
             return P, P[np.newaxis, :, :], P[np.newaxis, np.newaxis, :, :], P
         else:
             return P
 
-    estimator.fit(T_tr=T_tr, X_tr=X_tr, p=mock_pdf)
+    estimator.fit(T_tr=T_tr, X_tr=X_tr, U_tr=U_tr, kde_list=[mock_pdf])
     assert (
-        estimator.alpha is not None or estimator.alpha_pc is not None
+            estimator.alpha is not None or estimator.alpha_pc is not None
     ), "Model coefficients not calculated"
 
 
@@ -115,13 +113,13 @@ def fitted_estimator():
     est.alpha = np.random.rand(1, 100)  # Mock regression coefficients
     est.alpha_pc = np.random.rand(1, 100)  # Mock regression coefficients
     est.eps = np.random.rand(100, 1)
-    est.Z_tr = np.random.rand(100, 2)  # Mock training data points
+    est.Z_tr = np.random.rand(100, 3)  # Mock training data points
     est.n_z = 10  # Number of training points
 
     # Mock probability density function
     def mock_pdf(Ts, X, partial):
         Ts_grid, X_grid = np.meshgrid(Ts, X, indexing="ij")
-        P = np.exp(-(X_grid**2) / (1 + Ts_grid))
+        P = np.exp(-(X_grid ** 2) / (1 + Ts_grid))
         P = P.reshape((-1, 1))
         if partial:
             return P, P[np.newaxis, :, :], P[np.newaxis, np.newaxis, :, :], P
@@ -151,9 +149,10 @@ def test_predict(fitted_estimator):
     # Test inputs
     T_te = np.random.rand(10, 1)
     X_te = np.random.rand(10, 1)
+    V_te = np.random.rand(10, 1)
 
     # Execute predict method
-    B_pc, S_pc, B, S = fitted_estimator.predict(T_te, X_te, thresholding=True)
+    B_pc, S_pc, B, S = fitted_estimator.predict(T_te, X_te, V_te, thresholding=True)
 
     # Verify output shapes and types
     assert isinstance(B_pc, np.ndarray), "Expected B_pc to be a numpy array"
@@ -162,10 +161,10 @@ def test_predict(fitted_estimator):
     assert isinstance(S, np.ndarray), "Expected S to be a numpy array"
 
     # Assuming each prediction corresponds to each input
-    assert B_pc.shape == (1, 1, 100), "Incorrect shape for B_pc"
-    assert S_pc.shape == (1, 1, 100), "Incorrect shape for S_pc"
-    assert B.shape == (1, 1, 100), "Incorrect shape for B"
-    assert S.shape == (1, 100), "Incorrect shape for S"
+    assert B_pc.shape == (1, 1, 10), "Incorrect shape for B_pc"
+    assert S_pc.shape == (1, 1, 10), "Incorrect shape for S_pc"
+    assert B.shape == (1, 1, 10), "Incorrect shape for B"
+    assert S.shape == (1, 10), "Incorrect shape for S"
 
     # Check thresholding is applied
     assert np.all(S_pc >= 0), "Thresholding failed, S_pc contains negative values"

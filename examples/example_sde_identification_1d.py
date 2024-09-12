@@ -1,416 +1,212 @@
 import time
 import numpy as np
 from methods.kde import ProbaDensityEstimator
-from methods.fp_estimator import FPEstimator
+from methods.fp_estimator_controlled import FPEstimator
 from utils.data import (
     euler_maruyama,
-    ornstein_uhlenbeck,
-    ornstein_uhlenbeck_pdf,
-    plot_map_1d,
     plot_paths_1d,
-    line_plot,
 )
+from utils.data_controlled import ornstein_uhlenbeck_controlled, piecewise_constant_control
 
-# Simulation parameters.
+
+# Define a function to create a piecewise constant control function
+def create_control_function(U0, U1, S1):
+    """
+        Creates a piecewise constant control function based on input parameters.
+
+        Args:
+            U0 (float): Initial control value.
+            U1 (float): Final control value.
+            S1 (float): Time at which the control switches from U0 to U1.
+
+        Returns:
+            function: A lambda function representing the control over time `t`.
+        """
+    return lambda t: piecewise_constant_control(t, float(U0), float(U1), float(S1))
+
+
+# Define a function to set up and fit KDE estimators
+def setup_and_fit_estimator(Ts, Xs, gamma_t, L_t, mu_x, c_kernel, T_h):
+    """
+        Sets up and fits a Kernel Density Estimator (KDE) to the provided training data.
+
+        Args:
+            Ts (np.ndarray): Temporal discretization (training time points).
+            Xs (np.ndarray): Training data (sample paths).
+            gamma_t (float): Temporal kernel width.
+            L_t (float): Temporal regularization parameter.
+            mu_x (float): Spatial kernel width.
+            c_kernel (float): Regularization parameter for the kernel.
+            T_h (float): Total time horizon for the estimator.
+
+        Returns:
+            function: A function to predict the probability density using the KDE.
+        """
+    est = ProbaDensityEstimator()
+    est.gamma_t = gamma_t
+    est.mu_x = mu_x
+    est.L_t = L_t
+    est.c_kernel = c_kernel
+    est.T = T_h
+    est.fit(T_tr=Ts, X_tr=Xs)
+
+    def p(T_train, X, partial):
+        return est.predict(T_train, X, partial=partial)
+
+    return p
+
+
+# Simulation parameters for the controlled Ornstein-Uhlenbeck process
 n = 1  # Dimension of the state variable
-mu = np.array([2.5] * n)  # Mean
 theta = 0.5  # Rate of mean reversion
-sigma = 0.5 * theta ** (1 / 2)  # Volatility
-mean_0, std_0 = np.array([0.5] * n), sigma / (2 * theta) ** (
-    1 / 2
-)  # Mean and std at t=0
-T = 10  # Ending time
-n_steps = 400  # Number of time steps
-dt = T / n_steps  # Time step
-T_tr = (np.arange(0, n_steps) * dt).reshape(-1, 1)  # Temporal discretization
-n_paths = 2000  # Number of paths to draw
+sigma = 0.5 * theta ** (1 / 2)  # Volatility (diffusion coefficient)
+T = 10.0  # Time horizon for the simulation
+mu_0, sigma_0 = np.array([0] * n), sigma / (2 * theta) ** (
+        1 / 2
+)  # # Initial conditions (mean and std at t=0)
+n_steps = 100  # Number of discretized time steps
+dt = T / n_steps  # Size of each time step
+T_tr = (np.arange(1, n_steps + 1) * dt).reshape(-1, 1)  # Temporal discretization
+n_paths = 1000  # Number of paths to draw
 
-# Get drift and diffusion coefficients for the Ornstein–Uhlenbeck process.
-b, sigma_func = ornstein_uhlenbeck(mu=mu, theta=theta, sigma=sigma)
+# Generate sample paths from the SDE for K different control functions
+K = 10  # Number of different control functions
+U0s = np.random.uniform(-2, 2, K)
+U1s = np.random.uniform(-2, 2, K)
+S1s = np.random.uniform(3, 7, K)
+all_paths = np.zeros((n_paths * len(U1s), n_steps, n))
 
-# Generate a training data set of sample paths from the SDE associated to the provided coefficients.
-X_tr = euler_maruyama(b, sigma_func, n_steps, n_paths, T, n, mean_0, std_0)
+# Prepare for KDE fitting
+kde_list = []
+x_min, x_max = float('inf'), float('-inf')
+U_tr = []
 
-# Plot the training data set.
-n_plot = 100
-save_path = "../plots/test_sde_identification_1d/true_samples.pdf"
-plot_paths_1d(T_tr, X_tr[:n_plot], save_path=save_path)
+for k in range(K):
+    # Create control function.
+    u = create_control_function(float(U0s[k]), float(U1s[k]), float(S1s[k]))
+    U_tr.append(u)
 
-# Initialize the probability density estimator.
-kde = ProbaDensityEstimator()
+    # Define drift and diffusion coefficients for the controlled Ornstein-Uhlenbeck process.
+    b, sigma_func = ornstein_uhlenbeck_controlled(u=u, theta=theta, sigma=sigma)
 
-# Choose the hyperparameters for the probability density estimator.
-gamma_t = 1e-0
-L_t = 1e-6
-mu_x = 10
-c_kernel = 1e-5
-kde.gamma_t = gamma_t
-kde.mu_x = mu_x
-kde.L_t = L_t
-kde.c_kernel = c_kernel
+    # Generate a training data set of sample paths from the SDE associated to the provided coefficients (b, sigma).
+    X_tr = euler_maruyama(b, sigma_func, n_steps, n_paths, T, n, mu_0, sigma_0)
 
-# Fit the probability density estimator to the sample paths.
-kde.fit(T_tr=T_tr, X_tr=X_tr)
+    # Update x-axis limits
+    x_min = min(X_tr[:, :, 0].min() - 1, x_min)
+    x_max = max(X_tr[:, :, 0].max() + 1, x_max)
+
+    # Fit the probability density estimator to the sample paths.
+    kde_list.append(setup_and_fit_estimator(T_tr, X_tr, 1, 1e-3, 10, 1e-5, T))
+
+# Initialize the Fokker-Planck matching estimator.
+estimator = FPEstimator()
+
+# Set hyperparameters for Fokker-Planck matching estimator
+gamma_z = 1e-1  # Spatial kernel width
+c_kernel_z = 1e-5  # Spatial regularization parameter
+la = 1e-5  # Regularization parameter
+estimator.gamma_z = gamma_z
+estimator.la = la
+estimator.T = T
+estimator.c_kernel = c_kernel_z
+
+# Generate training points (t,x) uniformly in [0,T] x [-beta/2, beta/2]^n.
+n_t_fp = 20
+n_fp = 50
+T_fp = np.random.uniform(0, T, size=(n_t_fp, 1))
+X_fp = np.random.uniform(x_min, x_max, size=(n_fp, 1))
 
 # Generate uniform grid of test points (t,x) in [0,T] x [-beta/2, beta/2]^n for beta > 0.
 n_t_te = 50
 n_x_te = 200
 dt_te = T / n_t_te
-t_interpolation = dt_te / 2  # Time offset between test and train times
+t_interpolation = dt_te / 2  # Time offset for test points
 T_te = np.array([i * dt_te + t_interpolation for i in range(n_t_te)]).reshape(-1, 1)
-x_min, x_max = X_tr[:, :, 0].min() - 1, X_tr[:, :, 0].max() + 1
 X_te = np.linspace(x_min, x_max, n_x_te).reshape(-1, 1)
 
-# Predict the probability density on the test set.
-p_pred = kde.predict(T_te=T_te, X_te=X_te)
-p_true = ornstein_uhlenbeck_pdf(
-    T_te, X_te.reshape((-1, 1, 1)), mu, theta, sigma, mean_0, std_0
-)
+# Generate K_te different control functions drawn randomly.
+K_te = 10
+U0s = np.random.uniform(-2, 2, K_te)
+U1s = np.random.uniform(-2, 2, K_te)
+S1s = np.random.uniform(3, 7, K_te)
+all_paths = np.zeros((n_paths * len(U1s), n_steps, n))
 
-# Initialize the Fokker-Planck matching estimator.
-estimator = FPEstimator()
+x_min, x_max = float('inf'), float('-inf')
+U_te = []
+kde_list_te = []
 
-# Choose the hyperparameters for the Fokker-Planck matching estimator.
-gamma_z = 1e-2
-c_kernel_z = 1e-2
-la = 1e-1
-estimator.gamma_z = gamma_z
-estimator.la = la
-estimator.be = x_max - x_min
-estimator.T = T
-estimator.c_kernel = c_kernel
+for k in range(K):
+    # Create control function for testing
+    u = create_control_function(float(U0s[k]), float(U1s[k]), float(S1s[k]))
+    U_te.append(u)
 
-# Generate training points (t,x) uniformly in [0,T] x [-beta/2, beta/2]^n.
-n_t_fp = 50
-n_fp = 50
-T_fp = np.random.uniform(0, T, size=(n_t_fp, 1))
-X_fp = np.random.uniform(x_min, x_max, size=(n_fp, 1))
+    # Drift and diffusion coefficients for the Ornstein–Uhlenbeck process.
+    b, sigma_func = ornstein_uhlenbeck_controlled(u=u, theta=theta, sigma=sigma)
 
+    # Generate a training data set of sample paths from the SDE associated to the provided coefficients (b, sigma).
+    X_tr = euler_maruyama(b, sigma_func, n_steps, n_paths, T, n, mu_0, sigma_0)
+    x_min = min(X_tr[:, :, 0].min() - 1, x_min)
+    x_max = max(X_tr[:, :, 0].max() + 1, x_max)
 
 # Fit the  Fokker-Planck matching estimator with the training samples.
-def p(Ts, X, partial):
-    return kde.predict(Ts, X, partial=partial)
-
-
-estimator.fit(T_tr=T_fp, X_tr=X_fp, p=p)
-
-# Compute MSE of the FP fitting on the train and test sets.
-_, _, MSE_tr, _ = estimator.compute_mse()
-d_p_te_kolmogorov, d_p_te_direct, MSE_te, norms = estimator.compute_mse(T_te, X_te)
-print(f"Fokker-Planck train MSE : {MSE_tr}")
-print(f"Fokker-Planck test MSE : {MSE_te}")
-print(f"Target mean squared norm: {norms[1]}")
-print(f"Prediction mean squared norm: {norms[0]}")
-
-# Plot the true probability density values.
-xlabel = "$x$"
-ylabel = ""
-save_path = "../plots/test_sde_identification_1d/"
-save_name = "p_true"
-title = r"True density - $p$"
-alt_label = r"$t$"
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=p_true,
-    save_path=save_path,
-)
-
-# Plot the estimated probability density values.
-xlabel = "$x$"
-ylabel = ""
-save_name = f"p_pred"
-title = r"Estimated density - $\hat{p}$"
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=p_pred,
-    save_path=save_path,
-)
-
-# Plot both.
-xlabel = "$x$"
-ylabel = ""
-save_name = f"p_pred_p_true"
-title = r"True and estimated densities - $p$ and $\hat{p}$"
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=r"Time  $t$",
-    map1=p_true,
-    map2=p_pred,
-    save_path=save_path,
-    legend1="p(t,x)",
-    legend2=r"$\hat{p}(t,x)$",
-)
-
-# Plot both (with varying t on the x-axis, for several fixed x).
-xlabel = "$t$"
-ylabel = ""
-save_name = f"p_true_fixed_x"
-title = r"True density - $p$"
-alt_label = r"$x$"
-plot_map_1d(
-    X_te.reshape((-1, 1, 1)),
-    T_te,
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=p_true.T,
-    save_path=save_path,
-)
-save_name = f"p_pred_fixed_x"
-title = r"Estimated density -$\hat p$"
-plot_map_1d(
-    X_te.reshape((-1, 1, 1)),
-    T_te,
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=p_pred.T,
-    save_path=save_path,
-)
-
-# Plot both.
-save_name = f"p_both_fixed_x"
-title = r"True and estimated densities"
-plot_map_1d(
-    X_te.reshape((-1, 1, 1)),
-    T_te,
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=p_true.T,
-    map2=p_pred.T,
-    save_path=save_path,
-    legend1="p(t,x)",
-    legend2=r"$\hat{p}(t,x)$",
-)
-
-# Plot the values of the time derivative of the estimated probability density values
-# (for several fixed x, with varying t on the x-axis).
-xlabel = "$t$"
-ylabel = ""
-save_name = f"d_t_p_direct_fixed_x"
-title = r"$\frac{\partial \hat{p}}{\partial t}$"
-plot_map_1d(
-    X_te.reshape((-1, 1, 1)),
-    T_te,
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=d_p_te_direct.T,
-    save_path=save_path,
-)
-
-# Plot the values of the time derivative of the estimated probability density values.
-xlabel = "$x$"
-ylabel = ""
-save_name = f"d_t_p_direct"
-title = r"$\frac{\partial \hat{p}}{\partial t}$"
-alt_label = r"$t$"
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=d_p_te_direct,
-    save_path=save_path,
-)
-
-# Plot the values of the estimated probability density values through the Kolmogorov operator.
-title = r"$(\mathcal{L}^{(\hat b, \hat \sigma)})^* \hat p$"
-save_name = f"d_t_p_kolmogorov"
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=d_p_te_kolmogorov,
-    save_path=save_path,
-)
-
-# Plot both.
-save_name = f"d_t_p_kolmogorov_direct"
-title = r"$\frac{\partial \hat{p}}{\partial t}$ and $(\mathcal{L}^{(\hat b, \hat \sigma)})^* \hat p$"
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    save_name,
-    title,
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=d_p_te_kolmogorov,
-    map2=d_p_te_direct,
-    save_path=save_path,
-    legend1=r"$(\mathcal{L}^{(\hat b, \hat \sigma)})^* \hat p$",
-    legend2=r"$\frac{\partial \hat{p}}{\partial t}$",
-)
-
-# Predict the values of the SDE's coefficients on the test set.
-B_pred_pos, S_pred_pos, B_pred, S_pred = estimator.predict(T_te=T_te, X_te=X_te)
-S_pred = S_pred.reshape((n_t_te, n_x_te))
-B_pred = B_pred.reshape((n_t_te, n_x_te))
-S_pred_pos = S_pred_pos.reshape((n_t_te, n_x_te))
-B_pred_pos = B_pred_pos.reshape((n_t_te, n_x_te))
-
-# Plot these values.
-xlabel = "$x$"
-ylabel = ""
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    f"sigma_both",
-    r"$\sigma^2$",
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=S_pred,
-    map2=S_pred_pos,
-    save_path=save_path,
-    legend1="No cons.",
-    legend2=r"Pos. cons.",
-)
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    f"b_both",
-    r"$b$",
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=B_pred,
-    map2=B_pred_pos,
-    save_path=save_path,
-    legend1="No cons.",
-    legend2=r"Pos. cons.",
-)
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    f"sigma_pos",
-    r"$\sigma^2$",
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=r"$t$",
-    map1=S_pred_pos,
-    save_path=save_path,
-)
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    f"b_pos",
-    r"$b$",
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=B_pred_pos,
-    save_path=save_path,
-)
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    f"sigma",
-    r"$\sigma^2$",
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=S_pred,
-    save_path=save_path,
-)
-plot_map_1d(
-    T_te,
-    X_te.reshape((-1, 1, 1)),
-    f"b",
-    r"$b$",
-    xlabel=xlabel,
-    ylabel=ylabel,
-    alt_label=alt_label,
-    map1=B_pred,
-    save_path=save_path,
-)
+estimator.fit(T_tr=T_fp, X_tr=X_fp, U_tr=U_tr, kde_list=kde_list)
 
 # Generate a set of sample paths from the SDE associated to the estimated coefficients (b, sigma).
 print("Start sampling")
 n_paths = 100
 n_steps = 100
-
-
-def b(t, x):
-    b_pred = estimator.predict(
-        T_te=np.array(t).reshape(1, 1), X_te=np.array(x).reshape(1, 1)
-    )[0]
-    return b_pred
-
-
-def sigma_func(t, x):
-    s_pred = estimator.predict(
-        T_te=np.array(t).reshape(1, 1),
-        X_te=np.array(x).reshape(1, 1),
-        thresholding=True,
-    )[1]
-    return s_pred
-
-
 t0 = time.time()
-paths_pos = euler_maruyama(
-    b, sigma_func, n_steps, n_paths, T, n, mean_0, std_0, time=True
-)
+path_pos = []
+path_true = []
+
+for k in range(K_te):
+    # Define estimated function
+    def b(t, x):
+        b_pred = estimator.predict(
+            T_te=np.array(t).reshape(1, 1), X_te=np.array(x).reshape(1, 1), V_te=np.array(U_te[k](t)).reshape(1, 1)
+        )[0]
+        return b_pred
+
+
+    def sigma_func(t, x):
+        s_pred = estimator.predict(
+            T_te=np.array(t).reshape(1, 1),
+            X_te=np.array(x).reshape(1, 1),
+            V_te=np.array(U_te[k](t)).reshape(1, 1),
+            thresholding=True,
+        )[1]
+
+        return s_pred
+
+
+    # Drift and diffusion coefficients for the Ornstein–Uhlenbeck process.
+    b_true, sigma_func_true = ornstein_uhlenbeck_controlled(u=U_te[k], theta=theta, sigma=sigma)
+
+    # Simulate paths with estimated coefficients
+    path_pos_k = euler_maruyama(
+        b, sigma_func, n_steps, n_paths, T, n, mu_0, sigma_0, time=True
+    )
+    path_pos.append(path_pos_k)
+
+    # Simulate paths with true coefficients
+    path_pos_k_true = euler_maruyama(
+        b_true, sigma_func_true, n_steps, n_paths, T, n, mu_0, sigma_0, time=True
+    )
+    path_true.append(path_pos_k_true)
+
 print(f"End sampling")
 print(f"Sampling computation time: {time.time() - t0}")
 
-# Plot the set.
-dt = T / n_steps
-T_samp = (np.arange(0, n_steps) * dt).reshape(-1, 1)
-save_path = "../plots/test_sde_identification_1d/samples_pos.pdf"
-plot_paths_1d(T_samp, paths_pos, save_path=save_path)
+# Plot the generated paths (estimated and true)
+for k in range(K_te):
+    dt = T / n_steps
+    T_samp = (np.arange(0, n_steps) * dt).reshape(-1, 1)
 
-# Compute and plot mean and variance of estimated SDE w.r.t. time.
-mean_pos = np.mean(paths_pos, axis=0)
-std_pos = np.std(paths_pos, axis=0)
-save_path = "../plots/test_sde_identification_1d/mean_pos.pdf"
-line_plot(T_samp, mean_pos, save_path, title=r"$\hat \mu(t)$")
-save_path = "../plots/test_sde_identification_1d/std_pos.pdf"
-line_plot(T_samp, std_pos, save_path, title=r"$\hat \sigma(t)$")
+    # Plot estimated sample paths
+    save_path = f"../plots/test_sde_identification_1d/samples_estimated_{k}.pdf"
+    plot_paths_1d(T_samp, path_pos[k], save_path=save_path)
 
-# Compute and plot mean and variance of true SDE w.r.t. time.
-mean_true = np.exp(-theta * T_samp) * (mean_0 - mu) + mu
-var_true = (sigma**2 / (2 * theta)) * (1 - np.exp(-2 * theta * T_samp)) + np.exp(
-    -2 * theta * T_samp
-) * std_0**2
-std_true = var_true ** (1 / 2)
-save_path = "../plots/test_sde_identification_1d/mean_true.pdf"
-title = r"$\mu(t)$"
-line_plot(T_samp, mean_true, save_path, title)
-save_path = "../plots/test_sde_identification_1d/std_true.pdf"
-title = r"$\sigma(t)$"
-line_plot(T_samp, std_true, save_path, title)
+    # Plot true sample paths
+    save_path = f"../plots/test_sde_identification_1d/samples_true_{k}.pdf"
+    plot_paths_1d(T_samp, path_true[k], save_path=save_path)

@@ -7,7 +7,7 @@ from matplotlib.colors import LinearSegmentedColormap
 
 
 def euler_maruyama(
-    b, sigma, n_steps, n_paths, T, n, mu_0, sigma_0, coef_save=False, time=False
+        b, sigma, n_steps, n_paths, T, n, mu_0, sigma_0, coef_save=False, time=False
 ):
     """
     Simulate sample paths of a multidimensional stochastic differential equation (SDE)
@@ -44,7 +44,7 @@ def euler_maruyama(
     # Simulation loop
     for i in range(n_paths):
         x = np.zeros((n_steps, n))
-        cov_0 = sigma_0**2 * np.eye(n)
+        cov_0 = sigma_0 ** 2 * np.eye(n)
         x[0] = np.random.multivariate_normal(mu_0, cov_0)
         b_save = np.zeros((n_steps, n)) if coef_save else None
         s_save = np.zeros((n_steps, 1)) if coef_save else None
@@ -155,6 +155,37 @@ def gaussian(t1, x1, t2, x2, t3, x3, g):
     return b, sigma_func
 
 
+def gaussian_2(t1, x1, t2, x2, t3, x3, g):
+    """
+    Returns functions for Gaussian drift and diffusion coefficients based on the provided mean times, positions, and
+     multiplicative constant.
+
+    Parameters:
+        t1, t2, t3 (float): Mean times for the Gaussian components.
+        x1, x2, x3 (ndarray): Mean positions for the Gaussian components.
+        g (float): Multiplicative constant.
+
+    Returns:
+        tuple: A tuple containing the drift and diffusion coefficient functions.
+    """
+
+    def b(t, x):
+        b1 = np.exp(-g * (np.linalg.norm(x - x1) ** 2 + np.linalg.norm(t - t1) ** 2))
+        b2 = np.exp(-g * (np.linalg.norm(x - x2) ** 2 + np.linalg.norm(t - t2) ** 2))
+        b3 = np.exp(-g * (np.linalg.norm(x - x3) ** 2 + np.linalg.norm(t - t3) ** 2))
+        bs = b1 * np.array([1, 0]) + b2 * np.array([0, 1]) + b3 * np.array([-1, 1])
+        return 10 * bs
+
+    def sigma_func(t, x):
+        s1 = np.exp(-g * (np.linalg.norm(x - x1) ** 2 + np.linalg.norm(t - t1) ** 2))
+        s2 = np.exp(-g * (np.linalg.norm(x - x2) ** 2 + np.linalg.norm(t - t2) ** 2))
+        s3 = np.exp(-g * (np.linalg.norm(x - x3) ** 2 + np.linalg.norm(t - t3) ** 2))
+        ss = s1 + s2 + s3
+        return 0.2 * ss
+
+    return b, sigma_func
+
+
 def van_der_pol(mu, sigma):
     """
     Returns the drift and diffusion coefficients for the Van der Pol oscillator.
@@ -202,20 +233,38 @@ def plot_paths_1d(T, paths, save_path):
             T, path[:, 0], label=f"Path {idx}", color="black", alpha=0.5, linewidth=1
         )
 
-    ax.set_xlabel("Time t")
-    ax.set_ylabel("X(t)")
-    ax.set_title("Sample Paths")
-    plt.savefig(save_path)
+    ax.set_xlabel("t", fontsize=18)
+    ax.set_ylabel("X(t)", fontsize=18, labelpad=20)
+    # ax.set_title("Sample paths", fontsize=18)
+    [spine.set_linewidth(1.5) for spine in ax.spines.values()]
+    ax.tick_params(axis="both", which="major", labelsize=18, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=18, width=1.5)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    # x_ticks = [0, 1, 2, 3]
+    # y_ticks = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
+    # x_ticks = [0, 2, 4, 6, 8, 10]
+    # ax.set_xticks(x_ticks)
+    # ax.set_yticks(y_ticks)
+    # plt.subplots_adjust(left=0.6, right=0.95, top=0.9, bottom=0.1)
+    # ax.tick_params(axis="both", which="major", labelsize=14)
+
+    # Set range for the axes
+    # ax.set_ylim(-0.5, 4)
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_paths_2d(paths, save_path):
+def plot_paths_2d(paths, save_path, x_lim=None, y_lim=None):
     """
     Plot 2-dimensional sample paths.
 
     Parameters:
         paths (numpy.ndarray): Array of shape (n_paths, n_steps, 2) containing the simulated paths.
         save_path (str): File path where the plot will be saved.
+        x_lim (tuple of float, optional): A tuple specifying the (min, max) x-limits for the plot axes.
+         Use to fix the horizontal range of the plot.
+        y_lim (tuple of float, optional): A tuple specifying the (min, max) y-limits for the plot axes.
+         Use to fix the vertical range of the plot.
     """
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -231,11 +280,20 @@ def plot_paths_2d(paths, save_path):
             linewidth=1,
         )
 
-    ax.set_xlabel("$X_1(t)$")
-    ax.set_ylabel("$X_2(t)$")
-    ax.set_title("2D Sample Paths")
+    ax.set_xlabel("$X_1(t)$", fontsize=18)
+    ax.set_ylabel("$X_2(t)$", fontsize=18, labelpad=20)
     ax.set_aspect("equal", adjustable="box")  # Ensure equal aspect ratio
-    plt.savefig(save_path)
+    [spine.set_linewidth(1.5) for spine in ax.spines.values()]
+    ax.tick_params(axis="both", which="major", labelsize=18, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=18, width=1.5)
+    ax.grid(True, linestyle="--", alpha=0.5)
+
+    # Set axis limits if specified
+    if x_lim:
+        ax.set_xlim(x_lim)
+    if y_lim:
+        ax.set_ylim(y_lim)
+    plt.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -264,7 +322,7 @@ def plot_coefficients(paths, coeffs, save_path):
     ax.set_xlabel("X(t)")
     ax.set_ylabel(r"b/$\sigma^2$(t, x(t))")
     ax.set_title("Coefficient values along paths")
-    plt.savefig(save_path)
+    plt.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -293,17 +351,17 @@ def ornstein_uhlenbeck_pdf(T_te, X_te, mu, theta, sigma, mu_0, sigma_0):
     for i in range(M_te):
         t = T_te[i]
         mu_t = np.exp(-theta * t) * mu_0 + (1 - np.exp(-theta * t)) * mu
-        var_t = (sigma**2 / (2 * theta)) * (1 - np.exp(-2 * theta * t)) + np.exp(
+        var_t = (sigma ** 2 / (2 * theta)) * (1 - np.exp(-2 * theta * t)) + np.exp(
             -2 * theta * t
-        ) * sigma_0**2
+        ) * sigma_0 ** 2
         for j in range(n_te):
             for k in range(M):
                 x = X_te[j][k]
                 norm = np.linalg.norm(x - mu_t)
                 pdf_value = (
-                    var_t ** (-n / 2)
-                    * (2 * np.pi) ** (-n / 2)
-                    * np.exp(-0.5 * norm**2 / var_t)
+                        var_t ** (-n / 2)
+                        * (2 * np.pi) ** (-n / 2)
+                        * np.exp(-0.5 * norm ** 2 / var_t)
                 )
                 p[i, j * M + k] = pdf_value
 
@@ -311,18 +369,21 @@ def ornstein_uhlenbeck_pdf(T_te, X_te, mu, theta, sigma, mu_0, sigma_0):
 
 
 def plot_map_1d(
-    Ts,
-    X,
-    save_name,
-    title,
-    xlabel,
-    ylabel,
-    alt_label,
-    map1,
-    map2=None,
-    legend1=None,
-    legend2=None,
-    save_path=None,
+        Ts,
+        X,
+        save_name,
+        title,
+        xlabel,
+        ylabel,
+        alt_label,
+        map1,
+        map2=None,
+        legend1=None,
+        legend2=None,
+        save_path=None,
+        y_lim=None,
+        x_ticks=None,
+        y_ticks=None
 ):
     """
     Plots the 1d values of maps f(t, x) for given data.
@@ -340,6 +401,8 @@ def plot_map_1d(
         legend1 (str, optional): Legend label for the first distribution. Required if `map2` is provided.
         legend2 (str, optional): Legend label for the second distribution. Required if `map2` is provided.
         save_path (str): File path where the plot will be saved.
+        y_lim (tuple of float, optional): A tuple specifying the (min, max) y-limits for the plot axes.
+         Use to fix the vertical range of the plot.
     """
 
     fig, ax = plt.subplots(figsize=(8, 5))
@@ -354,47 +417,69 @@ def plot_map_1d(
         t = round(float(Ts[i]), 1)
         col = float((t - Ts[0]) / (Ts[-1] - Ts[0]))
 
-        ax.scatter(X_flat, map1[i], marker="x", s=20, c=[cmap(col)], label=f"t={t}")
+        ax.scatter(X_flat, map1[i], marker="+", s=40, c=[cmap(col)], label=f"t={t}")
 
         if map2 is not None:
             ax.scatter(X_flat, map2[i], s=20, c=[cmap(col)], label=f"t={t}")
 
     # Set labels, title, and color bar
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, label=alt_label)
+    ax.set_xlabel(xlabel, fontsize=18)
+    ax.set_ylabel(ylabel, fontsize=18, labelpad=20)
+    ax.set_title(title, fontsize=18)
+    cbar = fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, label=alt_label)
+    cbar.set_label(alt_label, fontsize=18)
+    cbar.ax.tick_params(labelsize=18)
+    [spine.set_linewidth(1.5) for spine in ax.spines.values()]
+    ax.tick_params(axis="both", which="major", labelsize=18, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=18, width=1.5)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    plt.subplots_adjust(left=0.6, right=0.95, top=0.9, bottom=0.1)
+
+    if x_ticks is not None:
+        x_ticks = [0, 1, 2, 3]
+        y_ticks = [-0.2, 0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        x_ticks = [-2, -1, 0, 1, 2, 3, 4, 5]
+        ax.set_xticks(x_ticks)
+        ax.set_yticks(y_ticks)
+
+    # Set range for the axes
+    if y_lim is not None:
+        ax.set_ylim(y_lim)
 
     # Handle legend for p1 and p2
     if map2 is not None:
         ax.legend(
             [
-                plt.Line2D([0], [0], marker="x", color="black", lw=0, markersize=5),
-                plt.Line2D([0], [0], marker="o", color="black", lw=0, markersize=5),
+                plt.Line2D([0], [0], marker="x", color="black", lw=0, markersize=18),
+                plt.Line2D([0], [0], marker="o", color="black", lw=0, markersize=18),
             ],
             [legend1, legend2],
+            fontsize=18,
         )
 
-    plt.savefig(os.path.join(save_path, f"{save_name}.pdf"))
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_path, f"{save_name}.pdf"), bbox_inches="tight")
     plt.close(fig)
 
 
 def plot_map_2d(
-    Ts,
-    X1s,
-    X2s,
-    name,
-    title,
-    xlabel,
-    ylabel,
-    alt_label,
-    map_v,
-    save_path=None,
-    fixed_t=False,
-    plot_levels=None,
-    norm_bar=None,
-    T_plot=None,
-    X_plot=None,
+        Ts,
+        X1s,
+        X2s,
+        name,
+        title,
+        xlabel,
+        ylabel,
+        alt_label,
+        map_v,
+        save_path=None,
+        fixed_t=False,
+        plot_levels=None,
+        norm_bar=None,
+        T_plot=None,
+        X_plot=None,
+        x_lim=None,
+        y_lim=None,
 ):
     """
     Plots 2D values of maps f(t, x1, x2) for given data.
@@ -417,6 +502,10 @@ def plot_map_2d(
         If None, it is calculated. Defaults to None.
         T_plot (numpy.ndarray, optional): Times of points to scatter.
         X_plot (numpy.ndarray, optional): Positions of points to scatter.
+        x_lim (tuple of float, optional): A tuple specifying the (min, max) x-limits for the plot axes.
+         Use to fix the horizontal range of the plot.
+        y_lim (tuple of float, optional): A tuple specifying the (min, max) y-limits for the plot axes.
+         Use to fix the vertical range of the plot.
 
     Returns:
         plot_levels (list): The contour levels used in the plot.
@@ -475,7 +564,7 @@ def plot_map_2d(
             linewidths=0.1,
             linestyles="dashed",
         )
-        plt.plot(x, y, ".", ms=0.1, color="black")
+        # plt.plot(x, y, ".", ms=0.1, color="black")
 
         # Optionally plot scatter points for specific time indices if T_plot and X_plot are provided.
         if idx_plot is not None and i < len(idx_plot):
@@ -489,17 +578,36 @@ def plot_map_2d(
                 s=1,
             )
 
+    # Set axis limits if specified
+    if x_lim:
+        ax.set_xlim(x_lim)
+    if y_lim:
+        ax.set_ylim(y_lim)
+
     # Set labels, title, color bar, and save.
     norm = colors.Normalize(t_min, t_max) if norm_bar is None else norm_bar
     ax.set(xlabel=xlabel, ylabel=ylabel, title=title, aspect="equal")
-    fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, label=alt_label)
-    plt.savefig(os.path.join(save_path, f"{name}.pdf"))
+    ax.set_xlabel(xlabel, fontsize=18)
+    ax.set_ylabel(ylabel, fontsize=18, labelpad=20)
+    cbar = fig.colorbar(cm.ScalarMappable(norm=norm, cmap=cmap), ax=ax, label=alt_label)
+    cbar.set_label(alt_label, fontsize=18)
+    cbar.ax.tick_params(labelsize=18)
+    ax.tick_params(axis="both", which="major", labelsize=18, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=18, width=1.5)
+    [spine.set_linewidth(1.5) for spine in ax.spines.values()]
+    ax.grid(True, linestyle="--", alpha=0.5)
+
+    # Set range for the axes
+    if y_lim is not None:
+        ax.set_ylim(y_lim)
+    plt.savefig(os.path.join(save_path, f"{name}.pdf"), bbox_inches="tight")
     plt.close(fig)
 
     return plot_levels, norm
 
 
-def line_plot(Ts, values, save_path, title, xlabel="t", ylabel=""):
+def line_plot(Ts, values, save_path, title, xlabel="t", ylabel="", fontsize=18, linewidth=1.5, x_ticks=None,
+              y_ticks=None):
     """
     Creates and saves a line plot.
 
@@ -518,7 +626,18 @@ def line_plot(Ts, values, save_path, title, xlabel="t", ylabel=""):
         Y-axis label (default is empty).
     """
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.plot(Ts, values)
-    ax.set(xlabel=xlabel, ylabel=ylabel, title=title)
-    fig.savefig(save_path)
+    ax.plot(Ts, values, color="black")
+    ax.set(title=title)
+    ax.set_xlabel(xlabel, fontsize=fontsize)
+    ax.set_ylabel(ylabel, fontsize=fontsize, labelpad=20)
+    [spine.set_linewidth(linewidth) for spine in ax.spines.values()]
+    ax.tick_params(axis="both", which="major", labelsize=fontsize, width=1.5)
+    ax.tick_params(axis="both", which="minor", labelsize=fontsize, width=1.5)
+    ax.grid(True, linestyle="--", alpha=0.5)
+
+    if x_ticks is not None:
+        ax.set_xticks(x_ticks)
+        ax.set_yticks(y_ticks)
+
+    fig.savefig(save_path, bbox_inches="tight")
     plt.close(fig)
