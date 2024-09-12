@@ -5,7 +5,7 @@
 
 ## Overview
 
-This repository provides a Python implementation for estimating the coefficients of controlled stochastic differential
+controlled-sde-learn is a Python library designed to estimate the coefficients of controlled stochastic differential
 equations (SDEs). The approach leverages kernel methods and Fokker-Planck equation matching to estimate the drift and
 diffusion coefficients from a data set of controlled sample paths with random controls.
 
@@ -24,6 +24,8 @@ library.
    estimating its coefficients using Fokker-Planck matching.
 5. **example_sde_identification_2d.py**. Presents a complete example for estimating the coefficients of a
    two-dimensional nonlinear controlled SDE.
+
+Explore these examples to understand how to simulate controlled SDEs and estimate their coefficients.
 
 ## Installation
 
